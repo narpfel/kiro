@@ -70,7 +70,7 @@
 
 #include "kiro.h"
 
-static editorConfig E;
+editorConfig E;
 
 enum KEY_ACTION{
         KEY_NULL = 0,       /* NULL */
@@ -1233,18 +1233,4 @@ void handleSigWinCh(int unused __attribute__((unused))) {
     if (E.cy > E.screenrows) E.cy = E.screenrows - 1;
     if (E.cx > E.screencols) E.cx = E.screencols - 1;
     editorRefreshScreen();
-}
-
-void initEditor(void) {
-    E.cx = 0;
-    E.cy = 0;
-    E.rowoff = 0;
-    E.coloff = 0;
-    E.numrows = 0;
-    E.row = NULL;
-    E.dirty = 0;
-    E.filename = NULL;
-    E.syntax = NULL;
-    updateWindowSize();
-    signal(SIGWINCH, handleSigWinCh);
 }

@@ -1,3 +1,5 @@
+use std::ptr;
+
 use libc::{c_char, c_int, c_uchar, time_t};
 
 #[repr(C)]
@@ -44,4 +46,25 @@ pub struct Editor {
     statusmsg: [c_char; 80],
     statusmsg_time: time_t,
     syntax: *mut Syntax,
+}
+
+impl Default for Editor {
+    fn default() -> Editor {
+        Editor {
+            cx: 0,
+            cy: 0,
+            rowoff: 0,
+            coloff: 0,
+            screenrows: 0,
+            screencols: 0,
+            numrows: 0,
+            rawmode: 0,
+            row: ptr::null_mut(),
+            dirty: 0,
+            filename: ptr::null_mut(),
+            statusmsg: [0; 80],
+            statusmsg_time: unsafe { libc::time(ptr::null_mut()) },
+            syntax: ptr::null_mut(),
+        }
+    }
 }
