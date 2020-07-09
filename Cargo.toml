@@ -1,0 +1,11 @@
+[package]
+name = "kiro"
+version = "0.1.0"
+authors = ["narpfel <narpfel@gmx.de>"]
+edition = "2018"
+
+[dependencies]
+libc = "0.2"
+
+[build-dependencies]
+cc = "1"

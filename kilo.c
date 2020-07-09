@@ -1288,7 +1288,7 @@ void initEditor(void) {
     signal(SIGWINCH, handleSigWinCh);
 }
 
-int main(int argc, char **argv) {
+int cmain(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr,"Usage: kilo <filename>\n");
         exit(1);
