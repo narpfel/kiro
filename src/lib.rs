@@ -29,7 +29,7 @@ pub struct Colour {
 }
 
 #[repr(C)]
-pub struct Config {
+pub struct Editor {
     cx: c_int,
     cy: c_int,
     rowoff: c_int,

@@ -3,13 +3,13 @@ language = "C"
 include_guard = "KIRO_H"
 
 [export]
-include = ["Syntax", "Row", "Colour", "Config"]
+include = ["Syntax", "Row", "Colour", "Editor"]
 
 [export.rename]
 Syntax = "editorSyntax"
 Colour = "hlcolor"
 Row = "erow"
-Config = "editorConfig"
+Editor = "editorConfig"
 
 [parse]
 parse_deps = true
