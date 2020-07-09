@@ -12,23 +12,23 @@ extern "C" {
 }
 
 #[derive(Debug)]
-enum KiloErr {
+enum KiroErr {
     IncorrectInvocation,
     NulError(NulError),
 }
 
-impl From<NulError> for KiloErr {
+impl From<NulError> for KiroErr {
     fn from(err: NulError) -> Self {
-        KiloErr::NulError(err)
+        KiroErr::NulError(err)
     }
 }
 
-type KiloResult<T> = Result<T, KiloErr>;
+type KiroResult<T> = Result<T, KiroErr>;
 
-fn main() -> KiloResult<()> {
+fn main() -> KiroResult<()> {
     let mut filename = std::env::args()
         .nth(1)
-        .ok_or(KiloErr::IncorrectInvocation)?;
+        .ok_or(KiroErr::IncorrectInvocation)?;
     unsafe {
         initEditor();
         editorSelectSyntaxHighlight(filename.as_mut_ptr() as _);
