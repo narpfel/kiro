@@ -15,7 +15,6 @@ use kiro::{
 
 #[link(name = "kilo", kind = "static")]
 extern "C" {
-    fn editorSelectSyntaxHighlight(filename: *mut c_char);
     fn editorOpen(filename: *mut c_char);
     fn enableRawMode(fd: c_int);
     fn editorSetStatusMessage(msg: *const c_char);
@@ -46,7 +45,6 @@ fn main() -> KiroResult<()> {
             return Err(kiro::Error::IoError(io::Error::last_os_error()));
         }
         libc::atexit(restore_primary_buffer);
-        editorSelectSyntaxHighlight(filename.as_mut_ptr() as _);
         editorOpen(filename.as_mut_ptr() as _);
         enableRawMode(libc::STDIN_FILENO);
         let help_message = CString::new(kiro::HELP_MESSAGE)?;

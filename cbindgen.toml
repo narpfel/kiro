@@ -5,11 +5,9 @@ include_guard = "KIRO_H"
 sys_includes = ["time.h"]
 
 [export]
-include = ["Syntax", "Row", "Colour", "Editor"]
+include = ["Row", "Editor"]
 
 [export.rename]
-Syntax = "editorSyntax"
-Colour = "hlcolor"
 Row = "erow"
 Editor = "editorConfig"
 
