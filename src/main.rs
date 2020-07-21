@@ -1,9 +1,17 @@
-use std::ffi::{CString, NulError};
-use std::io;
+use std::{
+    ffi::CString,
+    io,
+};
 
-use libc::{c_char, c_int};
+use libc::{
+    c_char,
+    c_int,
+};
 
-use kiro::Editor;
+use kiro::{
+    Editor,
+    KiroResult,
+};
 
 #[link(name = "kilo", kind = "static")]
 extern "C" {
@@ -11,7 +19,6 @@ extern "C" {
     fn editorOpen(filename: *mut c_char);
     fn enableRawMode(fd: c_int);
     fn editorSetStatusMessage(msg: *const c_char);
-    fn editorRefreshScreen();
     fn editorProcessKeypress(fd: c_int);
     fn updateWindowSize();
     fn handleSigWinCh(_: c_int);
@@ -19,41 +26,33 @@ extern "C" {
     static mut E: Editor;
 }
 
-#[derive(Debug)]
-enum KiroErr {
-    IncorrectInvocation,
-    NulError(NulError),
-    IoError(io::Error),
+extern "C" fn restore_primary_buffer() {
+    println!("{}", kiro::ansi::PRIMARY_BUFFER);
 }
-
-impl From<NulError> for KiroErr {
-    fn from(err: NulError) -> Self {
-        KiroErr::NulError(err)
-    }
-}
-
-type KiroResult<T> = Result<T, KiroErr>;
 
 fn main() -> KiroResult<()> {
     let mut filename = std::env::args()
         .nth(1)
-        .ok_or(KiroErr::IncorrectInvocation)?;
+        .ok_or(kiro::Error::IncorrectInvocation)?;
 
+    println!("{}", kiro::ansi::ALTERNATIVE_BUFFER);
     unsafe {
+        let locale = CString::new("")?;
+        libc::setlocale(libc::LC_CTYPE, locale.as_ptr() as _);
         E = Editor::default();
         updateWindowSize();
         let result = libc::signal(libc::SIGWINCH, handleSigWinCh as _);
         if result == libc::SIG_ERR {
-            return Err(KiroErr::IoError(io::Error::last_os_error()));
+            return Err(kiro::Error::IoError(io::Error::last_os_error()));
         }
+        libc::atexit(restore_primary_buffer);
         editorSelectSyntaxHighlight(filename.as_mut_ptr() as _);
         editorOpen(filename.as_mut_ptr() as _);
         enableRawMode(libc::STDIN_FILENO);
-        editorSetStatusMessage(
-            CString::new("HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find")?.as_ptr() as _,
-        );
+        let help_message = CString::new(kiro::HELP_MESSAGE)?;
+        editorSetStatusMessage(help_message.as_ptr() as _);
         loop {
-            editorRefreshScreen();
+            E.draw()?;
             editorProcessKeypress(libc::STDIN_FILENO);
         }
     }
