@@ -1,8 +1,8 @@
 Kiro
 ===
 
-Kiro is an (in progress) Rust port of Kilo, a small text editor in less than 1K
-lines of code (counted with cloc).
+Kiro is an (in progress) Rust port of [Kilo](https://github.com/antirez/kilo),
+a small text editor in less than 1K lines of code (counted with cloc).
 
 A screencast is available here: https://asciinema.org/a/90r2i9bq8po03nazhqtsifksb
 
@@ -24,4 +24,5 @@ or command line interfaces that are more advanced than the usual REPL
 style CLI.
 
 Kiro was written under the name Kilo by Salvatore Sanfilippo aka antirez and is
-released under the BSD 2 clause license.
+released under the BSD 2 clause license. Its original GitHub repo can be found
+[here](https://github.com/antirez/kilo).
