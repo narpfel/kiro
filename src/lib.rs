@@ -263,7 +263,12 @@ fn char_width(c: char) -> Option<usize> {
         return Some(8);
     }
     let len = unsafe { wcwidth(c as _) };
-    if len < 0 { None } else { Some(len as usize) }
+    if len < 0 {
+        None
+    }
+    else {
+        Some(len as usize)
+    }
 }
 
 fn render_width(s: &str) -> Option<usize> {
@@ -296,7 +301,9 @@ where
     type Iter = impl Iterator<Item = I::Item>;
 
     fn when(self, b: bool) -> When<Self::Iter> {
-        When { iter: self.filter(move |_| b) }
+        When {
+            iter: self.filter(move |_| b),
+        }
     }
 }
 
