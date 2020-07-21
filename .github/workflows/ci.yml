@@ -13,12 +13,49 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
-      - name: Build
+      - name: Install compatible clang
         run: |
-          cargo build
+          sudo apt-get -y update
+          sudo apt-get -y install clang-10 lld-10
+
+          # Ugly hack to make `cargo` call the right clang when linking
+          dir="$(mktemp -d)"
+          pushd "$dir"
+          ln -s /usr/bin/clang-10 clang
+          popd
+          echo "::add-path::$dir"
+      - name: Install Rust nightly toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+
   pre-commit:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
+      - name: Install compatible clang
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install clang-10 lld-10
+
+          # Ugly hack to make `cargo` call the right clang when linking
+          dir="$(mktemp -d)"
+          pushd "$dir"
+          ln -s /usr/bin/clang-10 clang
+          popd
+          echo "::add-path::$dir"
+      - name: Install Rust nightly toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+          components: clippy, rustfmt
       - uses: actions/setup-python@v1
       - uses: pre-commit/action@v2.0.0
