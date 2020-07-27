@@ -2,14 +2,15 @@ language = "C"
 
 include_guard = "KIRO_H"
 
-sys_includes = ["time.h"]
-
 [export]
 include = ["Row", "Editor"]
+exclude = ["Status"]
 
 [export.rename]
 Row = "erow"
 Editor = "editorConfig"
+
+Status = "void"
 
 [parse]
 parse_deps = true

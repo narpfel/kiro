@@ -85,8 +85,6 @@ enum KEY_ACTION{
         PAGE_DOWN
 };
 
-void editorSetStatusMessage(const char *fmt, ...);
-
 /* ======================= Low level terminal handling ====================== */
 
 static struct termios orig_termios; /* In order to restore at exit.*/
@@ -495,24 +493,14 @@ int editorSave(void) {
     close(fd);
     free(buf);
     E.dirty = 0;
-    editorSetStatusMessage("%d bytes written on disk", len);
+    editorSetStatusMessageWritten(len);
     return 0;
 
 writeerr:
     free(buf);
     if (fd != -1) close(fd);
-    editorSetStatusMessage("Can't save! I/O error: %s",strerror(errno));
+    editorSetStatusMessageIoError(strerror(errno));
     return 1;
-}
-
-/* Set an editor status message for the second line of the status, at the
- * end of the screen. */
-void editorSetStatusMessage(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap,fmt);
-    vsnprintf(E.statusmsg,sizeof(E.statusmsg),fmt,ap);
-    va_end(ap);
-    E.statusmsg_time = time(NULL);
 }
 
 /* =============================== Find mode ================================ */
@@ -530,8 +518,7 @@ void editorFind(int fd) {
     int saved_coloff = E.coloff, saved_rowoff = E.rowoff;
 
     while(1) {
-        editorSetStatusMessage(
-            "Search: %s (Use ESC/Arrows/Enter)", query);
+        editorSetStatusMessageSearch(query);
         editorRefreshScreen();
 
         int c = editorReadKey(fd);
@@ -543,7 +530,7 @@ void editorFind(int fd) {
                 E.cx = saved_cx; E.cy = saved_cy;
                 E.coloff = saved_coloff; E.rowoff = saved_rowoff;
             }
-            editorSetStatusMessage("");
+            editorClearStatusMessage();
             return;
         } else if (c == ARROW_RIGHT || c == ARROW_DOWN) {
             find_next = 1;
@@ -689,8 +676,7 @@ void editorProcessKeypress(int fd) {
     case CTRL_Q:        /* Ctrl-q */
         /* Quit if the file was already saved. */
         if (E.dirty && quit_times) {
-            editorSetStatusMessage("WARNING!!! File has unsaved changes. "
-                "Press Ctrl-Q %d more times to quit.", quit_times);
+            editorSetStatusMessageQuit(quit_times);
             quit_times--;
             return;
         }

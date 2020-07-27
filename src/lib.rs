@@ -16,12 +16,15 @@ use std::{
     },
     iter,
     ptr,
+    time::{
+        Duration,
+        Instant,
+    },
 };
 
 use libc::{
     c_char,
     c_int,
-    time_t,
 };
 
 pub mod ansi;
@@ -29,9 +32,19 @@ pub mod ansi;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const HELP_MESSAGE: &str = "HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find";
 
+pub const STATUS_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[link(name = "c")]
 extern "C" {
     fn wcwidth(c: libc::wchar_t) -> c_int;
+}
+
+#[link(name = "kilo", kind = "static")]
+extern "C" {
+    // FIXME: This warning is a bug, see https://github.com/rust-lang/rust/pull/72700 and
+    // https://github.com/rust-lang/rust/pull/74448
+    #[allow(improper_ctypes)]
+    static mut E: Editor;
 }
 
 #[derive(Debug)]
@@ -82,8 +95,7 @@ pub struct Editor {
     row: *mut Row,
     dirty: c_int,
     filename: *mut c_char,
-    statusmsg: [c_char; 80],
-    statusmsg_time: time_t,
+    status: *mut Status,
 }
 
 impl Default for Editor {
@@ -100,9 +112,14 @@ impl Default for Editor {
             row: ptr::null_mut(),
             dirty: 0,
             filename: ptr::null_mut(),
-            statusmsg: [0; 80],
-            statusmsg_time: unsafe { libc::time(ptr::null_mut()) },
+            status: Box::into_raw(Box::new(Status::default())),
         }
+    }
+}
+
+impl Drop for Editor {
+    fn drop(&mut self) {
+        self.drop_status();
     }
 }
 
@@ -176,6 +193,12 @@ impl Editor {
                     - render_width(&rstatus).unwrap_or_else(|| rstatus.len()),
             )
             .collect();
+        let statusmsg = if self.status().time.elapsed() <= STATUS_TIMEOUT {
+            &self.status().message
+        }
+        else {
+            ""
+        };
         format!(
             "{}{}{}{}{}{}{}{}{}",
             ansi::REVERSE,
@@ -185,7 +208,7 @@ impl Editor {
             ansi::CLEAR_REST_OF_LINE,
             ansi::EOL,
             ansi::RESET,
-            unsafe { CStr::from_ptr(self.statusmsg.as_ptr()).to_string_lossy() },
+            statusmsg,
             ansi::CLEAR_REST_OF_LINE,
         )
     }
@@ -207,8 +230,47 @@ impl Editor {
         ansi::goto_position(self.cx as usize + 1, self.cy as usize + 1)
     }
 
+    fn status(&self) -> &Status {
+        if self.status.is_null() {
+            unreachable!();
+        }
+        unsafe { &*self.status }
+    }
+
+    pub fn set_status(&mut self, message: String) {
+        self.drop_status();
+        self.status = Box::into_raw(Box::new(Status::new(message)));
+    }
+
+    fn drop_status(&mut self) {
+        if !self.status.is_null() {
+            unsafe { Box::from_raw(self.status) };
+            self.status = ptr::null_mut();
+        }
+    }
+
     fn empty_line() -> Cow<'static, str> {
         "~".into()
+    }
+}
+
+struct Status {
+    message: String,
+    time: Instant,
+}
+
+impl Status {
+    fn new(message: String) -> Status {
+        Status {
+            message,
+            time: Instant::now(),
+        }
+    }
+}
+
+impl Default for Status {
+    fn default() -> Status {
+        Status::new("".into())
     }
 }
 
@@ -291,14 +353,60 @@ where
     if_true.when(b).chain(if_false.when(!b))
 }
 
+fn instance() -> &'static mut Editor {
+    unsafe { &mut E }
+}
+
 #[no_mangle]
 pub extern "C" fn editorRefreshScreen() {
-    extern "C" {
-        static E: Editor;
-    }
-    let e = unsafe { &E };
-    std::panic::catch_unwind(|| e.draw().unwrap()).unwrap_or_else(|err| {
+    std::panic::catch_unwind(|| instance().draw().unwrap()).unwrap_or_else(|err| {
         println!("{:?}", err);
         std::process::exit(1);
     });
+}
+
+#[no_mangle]
+pub extern "C" fn editorClearStatusMessage() {
+    instance().set_status(String::new());
+}
+
+/// # Safety
+///
+/// `error` must be a null-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn editorSetStatusMessageIoError(error: *const c_char) {
+    if error.is_null() {
+        return;
+    }
+    instance().set_status(format!(
+        "Can’t save! I/O error: {:?}",
+        CStr::from_ptr(error).to_string_lossy()
+    ));
+}
+
+/// # Safety
+///
+/// `error` must be a null-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn editorSetStatusMessageSearch(query: *const c_char) {
+    if query.is_null() {
+        return;
+    }
+    instance().set_status(format!(
+        "Search: {} (Use Esc/Arrows/Return)",
+        CStr::from_ptr(query).to_string_lossy()
+    ));
+}
+
+#[no_mangle]
+pub extern "C" fn editorSetStatusMessageWritten(size: c_int) {
+    instance().set_status(format!("{} bytes written to disk", size));
+}
+
+#[no_mangle]
+pub extern "C" fn editorSetStatusMessageQuit(count: c_int) {
+    instance().set_status(format!(
+        "WARNING!!! File has unsaved changes. Press Ctrl-Q {} more times to quit.",
+        count
+    ));
 }

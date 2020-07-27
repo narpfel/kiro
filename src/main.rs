@@ -17,11 +17,13 @@ use kiro::{
 extern "C" {
     fn editorOpen(filename: *mut c_char);
     fn enableRawMode(fd: c_int);
-    fn editorSetStatusMessage(msg: *const c_char);
     fn editorProcessKeypress(fd: c_int);
     fn updateWindowSize();
     fn handleSigWinCh(_: c_int);
 
+    // FIXME: This warning is a bug, see https://github.com/rust-lang/rust/pull/72700 and
+    // https://github.com/rust-lang/rust/pull/74448
+    #[allow(improper_ctypes)]
     static mut E: Editor;
 }
 
@@ -47,8 +49,7 @@ fn main() -> KiroResult<()> {
         libc::atexit(restore_primary_buffer);
         editorOpen(filename.as_mut_ptr() as _);
         enableRawMode(libc::STDIN_FILENO);
-        let help_message = CString::new(kiro::HELP_MESSAGE)?;
-        editorSetStatusMessage(help_message.as_ptr() as _);
+        E.set_status(kiro::HELP_MESSAGE.into());
         loop {
             E.draw()?;
             editorProcessKeypress(libc::STDIN_FILENO);
