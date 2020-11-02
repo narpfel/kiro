@@ -30,7 +30,7 @@ use libc::{
 pub mod ansi;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const HELP_MESSAGE: &str = "HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find";
+pub const HELP_MESSAGE: &str = "HELP: Ctrl-S = save | Ctrl-Q = quit";
 
 pub const STATUS_TIMEOUT: Duration = Duration::from_secs(5);
 

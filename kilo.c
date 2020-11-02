@@ -62,7 +62,6 @@ enum KEY_ACTION{
         KEY_NULL = 0,       /* NULL */
         CTRL_C = 3,         /* Ctrl-c */
         CTRL_D = 4,         /* Ctrl-d */
-        CTRL_F = 6,         /* Ctrl-f */
         CTRL_H = 8,         /* Ctrl-h */
         TAB = 9,            /* Tab */
         CTRL_L = 12,        /* Ctrl+l */
@@ -503,83 +502,6 @@ writeerr:
     return 1;
 }
 
-/* =============================== Find mode ================================ */
-
-#define KILO_QUERY_LEN 256
-
-void editorFind(int fd) {
-    char query[KILO_QUERY_LEN+1] = {0};
-    int qlen = 0;
-    int last_match = -1; /* Last line where a match was found. -1 for none. */
-    int find_next = 0; /* if 1 search next, if -1 search prev. */
-
-    /* Save the cursor position in order to restore it later. */
-    int saved_cx = E.cx, saved_cy = E.cy;
-    int saved_coloff = E.coloff, saved_rowoff = E.rowoff;
-
-    while(1) {
-        editorSetStatusMessageSearch(query);
-        editorRefreshScreen();
-
-        int c = editorReadKey(fd);
-        if (c == DEL_KEY || c == CTRL_H || c == BACKSPACE) {
-            if (qlen != 0) query[--qlen] = '\0';
-            last_match = -1;
-        } else if (c == ESC || c == ENTER) {
-            if (c == ESC) {
-                E.cx = saved_cx; E.cy = saved_cy;
-                E.coloff = saved_coloff; E.rowoff = saved_rowoff;
-            }
-            editorClearStatusMessage();
-            return;
-        } else if (c == ARROW_RIGHT || c == ARROW_DOWN) {
-            find_next = 1;
-        } else if (c == ARROW_LEFT || c == ARROW_UP) {
-            find_next = -1;
-        } else if (isprint(c)) {
-            if (qlen < KILO_QUERY_LEN) {
-                query[qlen++] = c;
-                query[qlen] = '\0';
-                last_match = -1;
-            }
-        }
-
-        /* Search occurrence. */
-        if (last_match == -1) find_next = 1;
-        if (find_next) {
-            char *match = NULL;
-            int match_offset = 0;
-            int i, current = last_match;
-
-            for (i = 0; i < E.numrows; i++) {
-                current += find_next;
-                if (current == -1) current = E.numrows-1;
-                else if (current == E.numrows) current = 0;
-                match = strstr(E.row[current].chars,query);
-                if (match) {
-                    match_offset = match-E.row[current].chars;
-                    break;
-                }
-            }
-            find_next = 0;
-
-            if (match) {
-                last_match = current;
-                E.cy = 0;
-                E.cx = match_offset;
-                E.rowoff = current;
-                E.coloff = 0;
-                /* Scroll horizontally as needed. */
-                if (E.cx > E.screencols) {
-                    int diff = E.cx - E.screencols;
-                    E.cx -= diff;
-                    E.coloff += diff;
-                }
-            }
-        }
-    }
-}
-
 /* ========================= Editor events handling  ======================== */
 
 /* Handle cursor position change because arrow keys were pressed. */
@@ -684,9 +606,6 @@ void editorProcessKeypress(int fd) {
         break;
     case CTRL_S:        /* Ctrl-s */
         editorSave();
-        break;
-    case CTRL_F:
-        editorFind(fd);
         break;
     case BACKSPACE:     /* Backspace */
     case CTRL_H:        /* Ctrl-h */
