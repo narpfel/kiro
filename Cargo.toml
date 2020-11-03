@@ -4,9 +4,6 @@ version = "0.1.0"
 authors = ["narpfel <narpfel@gmx.de>"]
 edition = "2018"
 
-[profile.release]
-lto = true
-
 [dependencies]
 libc = "0.2"
 
