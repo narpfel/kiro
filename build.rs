@@ -12,12 +12,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     cc::Build::new()
         .compiler("clang")
         .flag("-std=c18")
-        .flag("-flto=thin")
         .flag("-Wall")
         .flag("-Wextra")
         .flag("-pedantic")
         .flag("-Werror")
-        .flag("-march=native")
         .file(SOURCE_FILE_NAME)
         .compile("libkilo.a");
 
