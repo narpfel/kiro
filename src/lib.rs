@@ -123,10 +123,10 @@ pub struct Editor {
     screencols: usize,
     numrows: usize,
     rawmode: usize,
-    rows: *mut Rows,
+    rows: Box<Rows>,
     dirty: usize,
     filename: *mut c_char,
-    status: *mut Status,
+    status: Box<Status>,
 }
 
 impl Default for Editor {
@@ -140,20 +140,11 @@ impl Default for Editor {
             screencols: 0,
             numrows: 0,
             rawmode: 0,
-            rows: Box::into_raw(Box::new(Vec::new())),
+            rows: Box::new(Vec::new()),
             dirty: 0,
             filename: ptr::null_mut(),
-            status: Box::into_raw(Box::new(Status::default())),
+            status: Box::new(Status::default()),
         }
-    }
-}
-
-impl Drop for Editor {
-    fn drop(&mut self) {
-        if !self.rows.is_null() {
-            unsafe { Box::from_raw(self.rows) };
-        }
-        self.drop_status();
     }
 }
 
@@ -215,10 +206,10 @@ impl Editor {
         let lstatus = format!(
             "{} - {} lines {}",
             unsafe { CStr::from_ptr(self.filename).to_string_lossy() },
-            self.rows().len(),
+            self.rows.len(),
             if self.dirty != 0 { "(modified)" } else { "" },
         );
-        let rstatus = format!("{}/{}", self.rowoff + self.cy + 1, self.rows().len(),);
+        let rstatus = format!("{}/{}", self.rowoff + self.cy + 1, self.rows.len(),);
         let padding: String = iter::repeat(' ')
             .take(
                 self.screencols as usize
@@ -227,8 +218,8 @@ impl Editor {
                     - render_width(&rstatus).unwrap_or_else(|| rstatus.len()),
             )
             .collect();
-        let statusmsg = if self.status().time.elapsed() <= STATUS_TIMEOUT {
-            &self.status().message
+        let statusmsg = if self.status.time.elapsed() <= STATUS_TIMEOUT {
+            &self.status.message
         }
         else {
             ""
@@ -248,14 +239,14 @@ impl Editor {
     }
 
     fn screen_lines(&self) -> impl Iterator<Item = Cow<str>> {
-        (0..std::cmp::min(self.screenrows, self.rows().len() - self.rowoff)).map(move |y| {
+        (0..std::cmp::min(self.screenrows, self.rows.len() - self.rowoff)).map(move |y| {
             let offset = self.rowoff + y;
-            (&self.rows()[offset as usize]).into()
+            (&self.rows[offset as usize]).into()
         })
     }
 
     fn is_empty(&self) -> bool {
-        self.rows().is_empty()
+        self.rows.is_empty()
     }
 
     fn goto_current_cursor_position(&self) -> String {
@@ -264,21 +255,21 @@ impl Editor {
     }
 
     fn insert_line(&mut self, idx: usize, line: String) {
-        self.rows_mut().insert(idx, line);
+        self.rows.insert(idx, line);
         self.dirty += 1;
     }
 
     fn append_line(&mut self, line: impl Into<String>) {
-        self.rows_mut().push(line.into());
+        self.rows.push(line.into());
     }
 
     fn insert_char(&mut self, c: char) {
         let filerow = self.filerow();
         let filecol = self.filecol();
-        for _ in self.rows().len()..=filerow {
+        for _ in self.rows.len()..=filerow {
             self.append_line("");
         }
-        let row = &mut self.rows_mut()[filerow];
+        let row = &mut self.rows[filerow];
         for _ in row.len()..filecol {
             row.push(' ');
         }
@@ -295,7 +286,7 @@ impl Editor {
     fn insert_newline(&mut self) {
         let filecol = self.filecol();
         let filerow = self.filerow();
-        if let Some(row) = self.rows_mut().get_mut(filerow) {
+        if let Some(row) = self.rows.get_mut(filerow) {
             let cursor_position = filecol.min(row.len());
             let end = row[cursor_position..].into();
             row.replace_range(cursor_position.., "");
@@ -320,7 +311,7 @@ impl Editor {
         if filerow == 0 && filecol == 0 {
             return;
         }
-        if let Some(row) = self.rows_mut().get_mut(filerow) {
+        if let Some(row) = self.rows.get_mut(filerow) {
             if filecol != 0 {
                 row.remove(filecol - 1);
                 if self.cx == 0 && self.coloff != 0 {
@@ -331,9 +322,9 @@ impl Editor {
                 }
             }
             else {
-                let row = self.rows_mut().remove(filerow);
-                let filecol = self.rows()[filerow - 1].len();
-                self.rows_mut()[filerow - 1].push_str(&row);
+                let row = self.rows.remove(filerow);
+                let filecol = self.rows[filerow - 1].len();
+                self.rows[filerow - 1].push_str(&row);
                 if self.cy == 0 {
                     self.rowoff -= 1;
                 }
@@ -363,7 +354,7 @@ impl Editor {
                     }
                     else if filerow > 0 {
                         self.cy -= 1;
-                        self.cx = self.rows()[(filerow - 1) as usize].len() as _;
+                        self.cx = self.rows[(filerow - 1) as usize].len() as _;
                         if self.cx > self.screencols - 1 {
                             self.coloff = self.cx - self.screencols + 1;
                             self.cx = self.screencols - 1;
@@ -374,7 +365,7 @@ impl Editor {
                     self.cx -= 1;
                 },
             KEY_ACTION::ARROW_RIGHT => {
-                if filerow < self.rows().len() && filecol < self.rows()[filerow].len() {
+                if filerow < self.rows.len() && filecol < self.rows[filerow].len() {
                     if self.cx == self.screencols - 1 {
                         self.coloff += 1;
                     }
@@ -382,7 +373,7 @@ impl Editor {
                         self.cx += 1;
                     }
                 }
-                else if filerow < self.rows().len() && filecol == self.rows()[filerow].len() {
+                else if filerow < self.rows.len() && filecol == self.rows[filerow].len() {
                     self.cx = 0;
                     self.coloff = 0;
                     if self.cy == self.screenrows - 1 {
@@ -403,7 +394,7 @@ impl Editor {
                     self.cy -= 1;
                 },
             KEY_ACTION::ARROW_DOWN =>
-                if filerow < self.rows().len() {
+                if filerow < self.rows.len() {
                     if self.cy == self.screenrows - 1 {
                         self.rowoff += 1;
                     }
@@ -415,7 +406,7 @@ impl Editor {
         }
         let filerow = self.rowoff + self.cy;
         let filecol = self.coloff + self.cx;
-        let rowlen = self.rows().get(filerow).map_or(0, String::len);
+        let rowlen = self.rows.get(filerow).map_or(0, String::len);
         if filecol > rowlen {
             self.coloff = std::cmp::min(self.coloff, rowlen);
             self.cx = rowlen - self.coloff;
@@ -442,7 +433,7 @@ impl Editor {
         };
         let bytes_written = {
             let mut file = File::create(temp_file_path.clone())?;
-            for row in self.rows() {
+            for row in &*self.rows {
                 writeln!(file, "{}", row)?;
             }
             file.metadata()?.len()
@@ -453,37 +444,8 @@ impl Editor {
         Ok(bytes_written)
     }
 
-    fn status(&self) -> &Status {
-        if self.status.is_null() {
-            unreachable!();
-        }
-        unsafe { &*self.status }
-    }
-
     pub fn set_status(&mut self, message: String) {
-        self.drop_status();
-        self.status = Box::into_raw(Box::new(Status::new(message)));
-    }
-
-    fn drop_status(&mut self) {
-        if !self.status.is_null() {
-            unsafe { Box::from_raw(self.status) };
-            self.status = ptr::null_mut();
-        }
-    }
-
-    fn rows(&self) -> &Rows {
-        if self.rows.is_null() {
-            panic!("tried to dereference null pointer Editor::rows");
-        }
-        unsafe { &*self.rows }
-    }
-
-    fn rows_mut(&mut self) -> &mut Rows {
-        if self.rows.is_null() {
-            panic!("tried to dereference null pointer Editor::rows");
-        }
-        unsafe { &mut *self.rows }
+        self.status = Box::new(Status::new(message));
     }
 
     fn filerow(&self) -> usize {
