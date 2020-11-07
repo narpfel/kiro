@@ -3,14 +3,10 @@ language = "C"
 include_guard = "KIRO_H"
 
 [export]
-include = ["Editor", "KEY_ACTION"]
-exclude = ["Status", "Rows"]
+include = ["Editor"]
 
 [export.rename]
 Editor = "editorConfig"
-
-Status = "void"
-Rows = "void"
 
 [parse]
 parse_deps = true
