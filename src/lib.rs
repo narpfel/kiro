@@ -359,10 +359,7 @@ fn instance() -> &'static mut Editor {
 
 #[no_mangle]
 pub extern "C" fn editorRefreshScreen() {
-    std::panic::catch_unwind(|| instance().draw().unwrap()).unwrap_or_else(|err| {
-        println!("{:?}", err);
-        std::process::exit(1);
-    });
+    instance().draw().unwrap()
 }
 
 #[no_mangle]
