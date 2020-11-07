@@ -9,6 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let crate_dir = std::env::var("CARGO_MANIFEST_DIR")?;
     cbindgen::generate(crate_dir)?.write_to_file("kiro.h");
 
+    #[cfg(not(windows))]
     cc::Build::new()
         .flag("-std=c11")
         .flag("-Wall")
@@ -17,6 +18,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .flag("-Werror")
         .file(SOURCE_FILE_NAME)
         .compile("libkilo.a");
+
+    #[cfg(windows)]
+    cc::Build::new()
+        .file(SOURCE_FILE_NAME)
+        .compile("kilo.lib");
 
     Ok(())
 }
