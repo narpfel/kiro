@@ -1,3 +1,4 @@
+#![feature(assoc_char_funcs)]
 #![feature(type_alias_impl_trait)]
 
 use std::{
@@ -5,16 +6,23 @@ use std::{
     ffi::{
         CStr,
         NulError,
+        OsStr,
     },
     fmt::{
         self,
         Write as FmtWrite,
+    },
+    fs::{
+        rename,
+        File,
     },
     io::{
         self,
         Write as IoWrite,
     },
     iter,
+    os::unix::ffi::OsStrExt,
+    path::Path,
     ptr,
     time::{
         Duration,
@@ -76,24 +84,47 @@ impl From<fmt::Error> for Error {
 pub type KiroResult<T> = Result<T, Error>;
 
 #[repr(C)]
-pub struct Row {
-    idx: c_int,
-    size: c_int,
-    chars: *mut c_char,
+#[allow(non_camel_case_types)]
+pub enum KEY_ACTION {
+    KEY_NULL = 0,    // NULL
+    CTRL_C = 3,      // Ctrl-c
+    CTRL_D = 4,      // Ctrl-d
+    CTRL_H = 8,      // Ctrl-h
+    TAB = 9,         // Tab
+    CTRL_L = 12,     // Ctrl+l
+    ENTER = 13,      // Enter
+    CTRL_Q = 17,     // Ctrl-q
+    CTRL_S = 19,     // Ctrl-s
+    CTRL_U = 21,     // Ctrl-u
+    ESC = 27,        // Escape
+    BACKSPACE = 127, // Backspace
+    // The following are just soft codes, not really reported by the
+    // terminal directly.
+    ARROW_LEFT = 1000,
+    ARROW_RIGHT,
+    ARROW_UP,
+    ARROW_DOWN,
+    DEL_KEY,
+    HOME_KEY,
+    END_KEY,
+    PAGE_UP,
+    PAGE_DOWN,
 }
+
+type Rows = Vec<String>;
 
 #[repr(C)]
 pub struct Editor {
-    cx: c_int,
-    cy: c_int,
-    rowoff: c_int,
-    coloff: c_int,
-    screenrows: c_int,
-    screencols: c_int,
-    numrows: c_int,
-    rawmode: c_int,
-    row: *mut Row,
-    dirty: c_int,
+    cx: usize,
+    cy: usize,
+    rowoff: usize,
+    coloff: usize,
+    screenrows: usize,
+    screencols: usize,
+    numrows: usize,
+    rawmode: usize,
+    rows: *mut Rows,
+    dirty: usize,
     filename: *mut c_char,
     status: *mut Status,
 }
@@ -109,7 +140,7 @@ impl Default for Editor {
             screencols: 0,
             numrows: 0,
             rawmode: 0,
-            row: ptr::null_mut(),
+            rows: Box::into_raw(Box::new(Vec::new())),
             dirty: 0,
             filename: ptr::null_mut(),
             status: Box::into_raw(Box::new(Status::default())),
@@ -119,6 +150,9 @@ impl Default for Editor {
 
 impl Drop for Editor {
     fn drop(&mut self) {
+        if !self.rows.is_null() {
+            unsafe { Box::from_raw(self.rows) };
+        }
         self.drop_status();
     }
 }
@@ -181,10 +215,10 @@ impl Editor {
         let lstatus = format!(
             "{} - {} lines {}",
             unsafe { CStr::from_ptr(self.filename).to_string_lossy() },
-            self.numrows,
+            self.rows().len(),
             if self.dirty != 0 { "(modified)" } else { "" },
         );
-        let rstatus = format!("{}/{}", self.rowoff + self.cy + 1, self.numrows,);
+        let rstatus = format!("{}/{}", self.rowoff + self.cy + 1, self.rows().len(),);
         let padding: String = iter::repeat(' ')
             .take(
                 self.screencols as usize
@@ -214,20 +248,209 @@ impl Editor {
     }
 
     fn screen_lines(&self) -> impl Iterator<Item = Cow<str>> {
-        (0..std::cmp::min(self.screenrows, self.numrows - self.rowoff)).map(move |y| {
+        (0..std::cmp::min(self.screenrows, self.rows().len() - self.rowoff)).map(move |y| {
             let offset = self.rowoff + y;
-            let row = unsafe { self.row.offset(offset as isize) };
-            unsafe { CStr::from_ptr((*row).chars).to_string_lossy() }
+            (&self.rows()[offset as usize]).into()
         })
     }
 
     fn is_empty(&self) -> bool {
-        self.numrows == 0
+        self.rows().is_empty()
     }
 
     fn goto_current_cursor_position(&self) -> String {
         // TODO: Tabs and multibyte/double width characters
         ansi::goto_position(self.cx as usize + 1, self.cy as usize + 1)
+    }
+
+    fn insert_line(&mut self, idx: usize, line: String) {
+        self.rows_mut().insert(idx, line);
+        self.dirty += 1;
+    }
+
+    fn append_line(&mut self, line: impl Into<String>) {
+        self.rows_mut().push(line.into());
+    }
+
+    fn insert_char(&mut self, c: char) {
+        let filerow = self.filerow();
+        let filecol = self.filecol();
+        for _ in self.rows().len()..=filerow {
+            self.append_line("");
+        }
+        let row = &mut self.rows_mut()[filerow];
+        for _ in row.len()..filecol {
+            row.push(' ');
+        }
+        row.insert(filecol, std::char::from_u32(c as _).expect("invalid char"));
+        if self.cx == self.screencols - 1 {
+            self.coloff += 1;
+        }
+        else {
+            self.cx += 1;
+        }
+        self.dirty += 1;
+    }
+
+    fn insert_newline(&mut self) {
+        let filecol = self.filecol();
+        let filerow = self.filerow();
+        if let Some(row) = self.rows_mut().get_mut(filerow) {
+            let cursor_position = filecol.min(row.len());
+            let end = row[cursor_position..].into();
+            row.replace_range(cursor_position.., "");
+            self.insert_line(filerow + 1, end);
+        }
+        else {
+            self.append_line("");
+        }
+        if self.cy == self.screenrows - 1 {
+            self.rowoff += 1;
+        }
+        else {
+            self.cy += 1;
+        }
+        self.cx = 0;
+        self.coloff = 0;
+    }
+
+    fn delete_character(&mut self) {
+        let filerow = self.filerow();
+        let filecol = self.filecol();
+        if filerow == 0 && filecol == 0 {
+            return;
+        }
+        if let Some(row) = self.rows_mut().get_mut(filerow) {
+            if filecol != 0 {
+                row.remove(filecol - 1);
+                if self.cx == 0 && self.coloff != 0 {
+                    self.coloff -= 1;
+                }
+                else {
+                    self.cx -= 1;
+                }
+            }
+            else {
+                let row = self.rows_mut().remove(filerow);
+                let filecol = self.rows()[filerow - 1].len();
+                self.rows_mut()[filerow - 1].push_str(&row);
+                if self.cy == 0 {
+                    self.rowoff -= 1;
+                }
+                else {
+                    self.cy -= 1;
+                }
+                self.cx = filecol;
+                if self.cx >= self.screencols {
+                    let shift = self.screencols - self.cx + 1;
+                    self.cx -= shift;
+                    self.coloff += shift;
+                }
+            }
+        }
+        self.dirty += 1;
+    }
+
+    fn move_cursor(&mut self, key: KEY_ACTION) {
+        let filerow = self.rowoff + self.cy;
+        let filecol = self.coloff + self.cx;
+
+        match key {
+            KEY_ACTION::ARROW_LEFT =>
+                if self.cx == 0 {
+                    if self.coloff != 0 {
+                        self.coloff -= 1;
+                    }
+                    else if filerow > 0 {
+                        self.cy -= 1;
+                        self.cx = self.rows()[(filerow - 1) as usize].len() as _;
+                        if self.cx > self.screencols - 1 {
+                            self.coloff = self.cx - self.screencols + 1;
+                            self.cx = self.screencols - 1;
+                        }
+                    }
+                }
+                else {
+                    self.cx -= 1;
+                },
+            KEY_ACTION::ARROW_RIGHT => {
+                if filerow < self.rows().len() && filecol < self.rows()[filerow].len() {
+                    if self.cx == self.screencols - 1 {
+                        self.coloff += 1;
+                    }
+                    else {
+                        self.cx += 1;
+                    }
+                }
+                else if filerow < self.rows().len() && filecol == self.rows()[filerow].len() {
+                    self.cx = 0;
+                    self.coloff = 0;
+                    if self.cy == self.screenrows - 1 {
+                        self.rowoff += 1;
+                    }
+                    else {
+                        self.cy += 1;
+                    }
+                }
+            }
+            KEY_ACTION::ARROW_UP =>
+                if self.cy == 0 {
+                    if self.rowoff != 0 {
+                        self.rowoff -= 1;
+                    }
+                }
+                else {
+                    self.cy -= 1;
+                },
+            KEY_ACTION::ARROW_DOWN =>
+                if filerow < self.rows().len() {
+                    if self.cy == self.screenrows - 1 {
+                        self.rowoff += 1;
+                    }
+                    else {
+                        self.cy += 1;
+                    }
+                },
+            _ => unreachable!(),
+        }
+        let filerow = self.rowoff + self.cy;
+        let filecol = self.coloff + self.cx;
+        let rowlen = self.rows().get(filerow).map_or(0, String::len);
+        if filecol > rowlen {
+            self.coloff = std::cmp::min(self.coloff, rowlen);
+            self.cx = rowlen - self.coloff;
+        }
+    }
+
+    fn save(&mut self) -> KiroResult<u64> {
+        if self.filename.is_null() {
+            panic!("null filename");
+        }
+        let path = std::fs::canonicalize(OsStr::from_bytes(
+            &unsafe { CStr::from_ptr(self.filename as _) }.to_bytes(),
+        ))?;
+        let file_name = {
+            let mut file_name = path.file_name().unwrap().to_os_string();
+            file_name.push("~kirosave");
+            file_name
+        };
+
+        let temp_file_path = {
+            let mut path = path.clone();
+            path.set_file_name(file_name);
+            path
+        };
+        let bytes_written = {
+            let mut file = File::create(temp_file_path.clone())?;
+            for row in self.rows() {
+                writeln!(file, "{}", row)?;
+            }
+            file.metadata()?.len()
+        };
+        rename(temp_file_path, path)?;
+
+        self.dirty = 0;
+        Ok(bytes_written)
     }
 
     fn status(&self) -> &Status {
@@ -247,6 +470,32 @@ impl Editor {
             unsafe { Box::from_raw(self.status) };
             self.status = ptr::null_mut();
         }
+    }
+
+    fn rows(&self) -> &Rows {
+        if self.rows.is_null() {
+            panic!("tried to dereference null pointer Editor::rows");
+        }
+        unsafe { &*self.rows }
+    }
+
+    fn rows_mut(&mut self) -> &mut Rows {
+        if self.rows.is_null() {
+            panic!("tried to dereference null pointer Editor::rows");
+        }
+        unsafe { &mut *self.rows }
+    }
+
+    fn filerow(&self) -> usize {
+        self.rowoff + self.cy
+    }
+
+    fn filecol(&self) -> usize {
+        self.coloff + self.cx
+    }
+
+    fn filename(&self) -> impl AsRef<Path> {
+        OsStr::from_bytes(unsafe { CStr::from_ptr(self.filename) }.to_bytes())
     }
 
     fn empty_line() -> Cow<'static, str> {
@@ -371,20 +620,6 @@ pub extern "C" fn editorClearStatusMessage() {
 ///
 /// `error` must be a null-terminated string.
 #[no_mangle]
-pub unsafe extern "C" fn editorSetStatusMessageIoError(error: *const c_char) {
-    if error.is_null() {
-        return;
-    }
-    instance().set_status(format!(
-        "Can’t save! I/O error: {:?}",
-        CStr::from_ptr(error).to_string_lossy()
-    ));
-}
-
-/// # Safety
-///
-/// `error` must be a null-terminated string.
-#[no_mangle]
 pub unsafe extern "C" fn editorSetStatusMessageSearch(query: *const c_char) {
     if query.is_null() {
         return;
@@ -396,14 +631,58 @@ pub unsafe extern "C" fn editorSetStatusMessageSearch(query: *const c_char) {
 }
 
 #[no_mangle]
-pub extern "C" fn editorSetStatusMessageWritten(size: c_int) {
-    instance().set_status(format!("{} bytes written to disk", size));
-}
-
-#[no_mangle]
 pub extern "C" fn editorSetStatusMessageQuit(count: c_int) {
     instance().set_status(format!(
         "WARNING!!! File has unsaved changes. Press Ctrl-Q {} more times to quit.",
         count
     ));
+}
+
+/// # Safety
+///
+/// `line` must be a null-terminated string. It is safe to pass `NULL` for
+/// `line`, but this crashes the editor.
+#[no_mangle]
+pub unsafe extern "C" fn editorInsertRow(
+    _numrows: c_int,
+    line: *const c_char,
+    _len: libc::ssize_t,
+) {
+    assert!(!line.is_null());
+    instance().append_line(CStr::from_ptr(line).to_string_lossy());
+}
+
+#[no_mangle]
+pub extern "C" fn editorInsertNewline() {
+    instance().insert_newline();
+}
+
+#[no_mangle]
+pub extern "C" fn editorSave() {
+    match instance().save() {
+        Ok(bytes_written) =>
+            instance().set_status(format!("{} bytes written to disk", bytes_written)),
+        Err(err) => {
+            instance().set_status(format!(
+                "Could not write to file `{}`: {:?}",
+                instance().filename().as_ref().display(),
+                err
+            ));
+        }
+    };
+}
+
+#[no_mangle]
+pub extern "C" fn editorDelChar() {
+    instance().delete_character();
+}
+
+#[no_mangle]
+pub extern "C" fn editorMoveCursor(key: KEY_ACTION) {
+    instance().move_cursor(key);
+}
+
+#[no_mangle]
+pub extern "C" fn editorInsertChar(c: c_int) {
+    instance().insert_char(char::from_u32(c as _).expect("invalid char"));
 }

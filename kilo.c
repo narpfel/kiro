@@ -58,32 +58,6 @@
 
 editorConfig E;
 
-enum KEY_ACTION{
-        KEY_NULL = 0,       /* NULL */
-        CTRL_C = 3,         /* Ctrl-c */
-        CTRL_D = 4,         /* Ctrl-d */
-        CTRL_H = 8,         /* Ctrl-h */
-        TAB = 9,            /* Tab */
-        CTRL_L = 12,        /* Ctrl+l */
-        ENTER = 13,         /* Enter */
-        CTRL_Q = 17,        /* Ctrl-q */
-        CTRL_S = 19,        /* Ctrl-s */
-        CTRL_U = 21,        /* Ctrl-u */
-        ESC = 27,           /* Escape */
-        BACKSPACE =  127,   /* Backspace */
-        /* The following are just soft codes, not really reported by the
-         * terminal directly. */
-        ARROW_LEFT = 1000,
-        ARROW_RIGHT,
-        ARROW_UP,
-        ARROW_DOWN,
-        DEL_KEY,
-        HOME_KEY,
-        END_KEY,
-        PAGE_UP,
-        PAGE_DOWN
-};
-
 /* ======================= Low level terminal handling ====================== */
 
 static struct termios orig_termios; /* In order to restore at exit.*/
@@ -191,7 +165,7 @@ int editorReadKey(int fd) {
 /* Use the ESC [6n escape sequence to query the horizontal cursor position
  * and return it. On error -1 is returned, on success the position of the
  * cursor is stored at *rows and *cols and 0 is returned. */
-int getCursorPosition(int ifd, int ofd, int *rows, int *cols) {
+int getCursorPosition(int ifd, int ofd, size_t *rows, size_t *cols) {
     char buf[32];
     unsigned int i = 0;
 
@@ -208,19 +182,20 @@ int getCursorPosition(int ifd, int ofd, int *rows, int *cols) {
 
     /* Parse it. */
     if (buf[0] != ESC || buf[1] != '[') return -1;
-    if (sscanf(buf+2,"%d;%d",rows,cols) != 2) return -1;
+    if (sscanf(buf+2,"%zd;%zd",rows,cols) != 2) return -1;
     return 0;
 }
 
 /* Try to get the number of columns in the current terminal. If the ioctl()
  * call fails the function will try to query the terminal itself.
  * Returns 0 on success, -1 on error. */
-int getWindowSize(int ifd, int ofd, int *rows, int *cols) {
+int getWindowSize(int ifd, int ofd, size_t *rows, size_t *cols) {
     struct winsize ws;
 
     if (ioctl(1, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
         /* ioctl() failed. Try to query the terminal itself. */
-        int orig_row, orig_col, retval;
+        size_t orig_row, orig_col;
+        int retval;
 
         /* Get the initial position so we can restore it later. */
         retval = getCursorPosition(ifd,ofd,&orig_row,&orig_col);
@@ -233,7 +208,7 @@ int getWindowSize(int ifd, int ofd, int *rows, int *cols) {
 
         /* Restore position. */
         char seq[32];
-        snprintf(seq,32,"\x1b[%d;%dH",orig_row,orig_col);
+        snprintf(seq,32,"\x1b[%zu;%zuH",orig_row,orig_col);
         if (write(ofd,seq,strlen(seq)) == -1) {
             /* Can't recover... */
         }
@@ -246,201 +221,6 @@ int getWindowSize(int ifd, int ofd, int *rows, int *cols) {
 
 failed:
     return -1;
-}
-
-/* ======================= Editor rows implementation ======================= */
-
-/* Insert a row at the specified position, shifting the other rows on the bottom
- * if required. */
-void editorInsertRow(int at, char *s, size_t len) {
-    if (at > E.numrows) return;
-    E.row = realloc(E.row,sizeof(erow)*(E.numrows+1));
-    if (at != E.numrows) {
-        memmove(E.row+at+1,E.row+at,sizeof(E.row[0])*(E.numrows-at));
-        for (int j = at+1; j <= E.numrows; j++) E.row[j].idx++;
-    }
-    E.row[at].size = len;
-    E.row[at].chars = malloc(len+1);
-    memcpy(E.row[at].chars,s,len+1);
-    E.row[at].idx = at;
-    E.numrows++;
-    E.dirty++;
-}
-
-/* Free row's heap allocated stuff. */
-void editorFreeRow(erow *row) {
-    free(row->chars);
-}
-
-/* Remove the row at the specified position, shifting the remainign on the
- * top. */
-void editorDelRow(int at) {
-    erow *row;
-
-    if (at >= E.numrows) return;
-    row = E.row+at;
-    editorFreeRow(row);
-    memmove(E.row+at,E.row+at+1,sizeof(E.row[0])*(E.numrows-at-1));
-    for (int j = at; j < E.numrows-1; j++) E.row[j].idx++;
-    E.numrows--;
-    E.dirty++;
-}
-
-/* Turn the editor rows into a single heap-allocated string.
- * Returns the pointer to the heap-allocated string and populate the
- * integer pointed by 'buflen' with the size of the string, escluding
- * the final nulterm. */
-char *editorRowsToString(int *buflen) {
-    char *buf = NULL, *p;
-    int totlen = 0;
-    int j;
-
-    /* Compute count of bytes */
-    for (j = 0; j < E.numrows; j++)
-        totlen += E.row[j].size+1; /* +1 is for "\n" at end of every row */
-    *buflen = totlen;
-    totlen++; /* Also make space for nulterm */
-
-    p = buf = malloc(totlen);
-    for (j = 0; j < E.numrows; j++) {
-        memcpy(p,E.row[j].chars,E.row[j].size);
-        p += E.row[j].size;
-        *p = '\n';
-        p++;
-    }
-    *p = '\0';
-    return buf;
-}
-
-/* Insert a character at the specified position in a row, moving the remaining
- * chars on the right if needed. */
-void editorRowInsertChar(erow *row, int at, int c) {
-    if (at > row->size) {
-        /* Pad the string with spaces if the insert location is outside the
-         * current length by more than a single character. */
-        int padlen = at-row->size;
-        /* In the next line +2 means: new char and null term. */
-        row->chars = realloc(row->chars,row->size+padlen+2);
-        memset(row->chars+row->size,' ',padlen);
-        row->chars[row->size+padlen+1] = '\0';
-        row->size += padlen+1;
-    } else {
-        /* If we are in the middle of the string just make space for 1 new
-         * char plus the (already existing) null term. */
-        row->chars = realloc(row->chars,row->size+2);
-        memmove(row->chars+at+1,row->chars+at,row->size-at+1);
-        row->size++;
-    }
-    row->chars[at] = c;
-    E.dirty++;
-}
-
-/* Append the string 's' at the end of a row */
-void editorRowAppendString(erow *row, char *s, size_t len) {
-    row->chars = realloc(row->chars,row->size+len+1);
-    memcpy(row->chars+row->size,s,len);
-    row->size += len;
-    row->chars[row->size] = '\0';
-    E.dirty++;
-}
-
-/* Delete the character at offset 'at' from the specified row. */
-void editorRowDelChar(erow *row, int at) {
-    if (row->size <= at) return;
-    memmove(row->chars+at,row->chars+at+1,row->size-at);
-    row->size--;
-    E.dirty++;
-}
-
-/* Insert the specified char at the current prompt position. */
-void editorInsertChar(int c) {
-    int filerow = E.rowoff+E.cy;
-    int filecol = E.coloff+E.cx;
-    erow *row = (filerow >= E.numrows) ? NULL : &E.row[filerow];
-
-    /* If the row where the cursor is currently located does not exist in our
-     * logical representaion of the file, add enough empty rows as needed. */
-    if (!row) {
-        while(E.numrows <= filerow)
-            editorInsertRow(E.numrows,"",0);
-    }
-    row = &E.row[filerow];
-    editorRowInsertChar(row,filecol,c);
-    if (E.cx == E.screencols-1)
-        E.coloff++;
-    else
-        E.cx++;
-    E.dirty++;
-}
-
-/* Inserting a newline is slightly complex as we have to handle inserting a
- * newline in the middle of a line, splitting the line as needed. */
-void editorInsertNewline(void) {
-    int filerow = E.rowoff+E.cy;
-    int filecol = E.coloff+E.cx;
-    erow *row = (filerow >= E.numrows) ? NULL : &E.row[filerow];
-
-    if (!row) {
-        if (filerow == E.numrows) {
-            editorInsertRow(filerow,"",0);
-            goto fixcursor;
-        }
-        return;
-    }
-    /* If the cursor is over the current line size, we want to conceptually
-     * think it's just over the last character. */
-    if (filecol >= row->size) filecol = row->size;
-    if (filecol == 0) {
-        editorInsertRow(filerow,"",0);
-    } else {
-        /* We are in the middle of a line. Split it between two rows. */
-        editorInsertRow(filerow+1,row->chars+filecol,row->size-filecol);
-        row = &E.row[filerow];
-        row->chars[filecol] = '\0';
-        row->size = filecol;
-    }
-fixcursor:
-    if (E.cy == E.screenrows-1) {
-        E.rowoff++;
-    } else {
-        E.cy++;
-    }
-    E.cx = 0;
-    E.coloff = 0;
-}
-
-/* Delete the char at the current prompt position. */
-void editorDelChar() {
-    int filerow = E.rowoff+E.cy;
-    int filecol = E.coloff+E.cx;
-    erow *row = (filerow >= E.numrows) ? NULL : &E.row[filerow];
-
-    if (!row || (filecol == 0 && filerow == 0)) return;
-    if (filecol == 0) {
-        /* Handle the case of column 0, we need to move the current line
-         * on the right of the previous one. */
-        filecol = E.row[filerow-1].size;
-        editorRowAppendString(&E.row[filerow-1],row->chars,row->size);
-        editorDelRow(filerow);
-        row = NULL;
-        if (E.cy == 0)
-            E.rowoff--;
-        else
-            E.cy--;
-        E.cx = filecol;
-        if (E.cx >= E.screencols) {
-            int shift = (E.screencols-E.cx)+1;
-            E.cx -= shift;
-            E.coloff += shift;
-        }
-    } else {
-        editorRowDelChar(row,filecol-1);
-        if (E.cx == 0 && E.coloff)
-            E.coloff--;
-        else
-            E.cx--;
-    }
-    E.dirty++;
 }
 
 /* Load the specified program in the editor memory and returns 0 on success
@@ -475,107 +255,6 @@ int editorOpen(char *filename) {
     fclose(fp);
     E.dirty = 0;
     return 0;
-}
-
-/* Save the current file on disk. Return 0 on success, 1 on error. */
-int editorSave(void) {
-    int len;
-    char *buf = editorRowsToString(&len);
-    int fd = open(E.filename,O_RDWR|O_CREAT,0644);
-    if (fd == -1) goto writeerr;
-
-    /* Use truncate + a single write(2) call in order to make saving
-     * a bit safer, under the limits of what we can do in a small editor. */
-    if (ftruncate(fd,len) == -1) goto writeerr;
-    if (write(fd,buf,len) != len) goto writeerr;
-
-    close(fd);
-    free(buf);
-    E.dirty = 0;
-    editorSetStatusMessageWritten(len);
-    return 0;
-
-writeerr:
-    free(buf);
-    if (fd != -1) close(fd);
-    editorSetStatusMessageIoError(strerror(errno));
-    return 1;
-}
-
-/* ========================= Editor events handling  ======================== */
-
-/* Handle cursor position change because arrow keys were pressed. */
-void editorMoveCursor(int key) {
-    int filerow = E.rowoff+E.cy;
-    int filecol = E.coloff+E.cx;
-    int rowlen;
-    erow *row = (filerow >= E.numrows) ? NULL : &E.row[filerow];
-
-    switch(key) {
-    case ARROW_LEFT:
-        if (E.cx == 0) {
-            if (E.coloff) {
-                E.coloff--;
-            } else {
-                if (filerow > 0) {
-                    E.cy--;
-                    E.cx = E.row[filerow-1].size;
-                    if (E.cx > E.screencols-1) {
-                        E.coloff = E.cx-E.screencols+1;
-                        E.cx = E.screencols-1;
-                    }
-                }
-            }
-        } else {
-            E.cx -= 1;
-        }
-        break;
-    case ARROW_RIGHT:
-        if (row && filecol < row->size) {
-            if (E.cx == E.screencols-1) {
-                E.coloff++;
-            } else {
-                E.cx += 1;
-            }
-        } else if (row && filecol == row->size) {
-            E.cx = 0;
-            E.coloff = 0;
-            if (E.cy == E.screenrows-1) {
-                E.rowoff++;
-            } else {
-                E.cy += 1;
-            }
-        }
-        break;
-    case ARROW_UP:
-        if (E.cy == 0) {
-            if (E.rowoff) E.rowoff--;
-        } else {
-            E.cy -= 1;
-        }
-        break;
-    case ARROW_DOWN:
-        if (filerow < E.numrows) {
-            if (E.cy == E.screenrows-1) {
-                E.rowoff++;
-            } else {
-                E.cy += 1;
-            }
-        }
-        break;
-    }
-    /* Fix cx if the current line has not enough chars. */
-    filerow = E.rowoff+E.cy;
-    filecol = E.coloff+E.cx;
-    row = (filerow >= E.numrows) ? NULL : &E.row[filerow];
-    rowlen = row ? row->size : 0;
-    if (filecol > rowlen) {
-        E.cx -= filecol-rowlen;
-        if (E.cx < 0) {
-            E.coloff += E.cx;
-            E.cx = 0;
-        }
-    }
 }
 
 /* Process events arriving from the standard input, which is, the user
