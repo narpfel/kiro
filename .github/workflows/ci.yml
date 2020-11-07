@@ -31,6 +31,13 @@ jobs:
           profile: minimal
           toolchain: nightly
           override: true
+
+      - name: Install LLVM
+        if: runner.os == 'Windows'
+        run: |
+          choco install -y llvm
+          refreshenv
+
       - name: Build (${{ matrix.profile.name }})
         uses: actions-rs/cargo@v1
         with:
