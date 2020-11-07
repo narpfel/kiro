@@ -10,7 +10,19 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        profile:
+          - name: dev
+            flag: ""
+          - name: release
+            flag: --release
+        os:
+          - ubuntu-20.04
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
       - name: Install Rust nightly toolchain
@@ -19,15 +31,11 @@ jobs:
           profile: minimal
           toolchain: nightly
           override: true
-      - name: Build
+      - name: Build (${{ matrix.profile.name }})
         uses: actions-rs/cargo@v1
         with:
           command: build
-      - name: Build (release)
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release
+          args: ${{ matrix.profile.flag }}
 
   pre-commit:
     runs-on: ubuntu-20.04
