@@ -124,7 +124,7 @@ pub struct Editor {
     numrows: usize,
     rawmode: usize,
     rows: Box<Rows>,
-    dirty: usize,
+    dirty: bool,
     filename: *mut c_char,
     status: Box<Status>,
 }
@@ -141,7 +141,7 @@ impl Default for Editor {
             numrows: 0,
             rawmode: 0,
             rows: Box::new(Vec::new()),
-            dirty: 0,
+            dirty: true,
             filename: ptr::null_mut(),
             status: Box::new(Status::default()),
         }
@@ -207,7 +207,7 @@ impl Editor {
             "{} - {} lines {}",
             unsafe { CStr::from_ptr(self.filename).to_string_lossy() },
             self.rows.len(),
-            if self.dirty != 0 { "(modified)" } else { "" },
+            if self.dirty { "(modified)" } else { "" },
         );
         let rstatus = format!("{}/{}", self.rowoff + self.cy + 1, self.rows.len(),);
         let padding: String = iter::repeat(' ')
@@ -256,7 +256,7 @@ impl Editor {
 
     fn insert_line(&mut self, idx: usize, line: String) {
         self.rows.insert(idx, line);
-        self.dirty += 1;
+        self.dirty = true;
     }
 
     fn append_line(&mut self, line: impl Into<String>) {
@@ -280,7 +280,7 @@ impl Editor {
         else {
             self.cx += 1;
         }
-        self.dirty += 1;
+        self.dirty = true;
     }
 
     fn insert_newline(&mut self) {
@@ -339,7 +339,7 @@ impl Editor {
                 }
             }
         }
-        self.dirty += 1;
+        self.dirty = true;
     }
 
     fn move_cursor(&mut self, key: KEY_ACTION) {
@@ -440,7 +440,7 @@ impl Editor {
         };
         rename(temp_file_path, path)?;
 
-        self.dirty = 0;
+        self.dirty = false;
         Ok(bytes_written)
     }
 

@@ -39,6 +39,7 @@
 #endif
 
 #include <termios.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -228,7 +229,7 @@ failed:
 int editorOpen(char *filename) {
     FILE *fp;
 
-    E.dirty = 0;
+    E.dirty = false;
     free(E.filename);
     size_t fnlen = strlen(filename)+1;
     E.filename = malloc(fnlen);
@@ -253,7 +254,7 @@ int editorOpen(char *filename) {
     }
     free(line);
     fclose(fp);
-    E.dirty = 0;
+    E.dirty = false;
     return 0;
 }
 
