@@ -1,6 +1,9 @@
 use std::{
     ffi::CString,
-    io,
+    io::{
+        self,
+        Write,
+    },
     mem,
 };
 
@@ -25,7 +28,8 @@ extern "C" {
 }
 
 extern "C" fn restore_primary_buffer() {
-    println!("{}", kiro::ansi::PRIMARY_BUFFER);
+    print!("{}", kiro::ansi::PRIMARY_BUFFER);
+    io::stdout().lock().flush().unwrap();
 }
 
 fn main() -> KiroResult<()> {
