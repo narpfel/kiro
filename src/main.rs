@@ -1,6 +1,7 @@
 use std::{
     ffi::CString,
     io,
+    mem,
 };
 
 use libc::{
@@ -40,7 +41,10 @@ fn main() -> KiroResult<()> {
     unsafe {
         let locale = CString::new("")?;
         libc::setlocale(libc::LC_CTYPE, locale.as_ptr() as _);
-        E = Editor::default();
+        // XXX: `E` is statically allocated on the C side, so it is not correctly
+        // initialised on the Rust side. This means we cannot run the
+        // destructor.
+        mem::forget(mem::take(&mut E));
         updateWindowSize();
         let result = libc::signal(libc::SIGWINCH, handleSigWinCh as _);
         if result == libc::SIG_ERR {
