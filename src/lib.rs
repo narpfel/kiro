@@ -6,7 +6,6 @@ use std::{
     ffi::{
         CStr,
         NulError,
-        OsStr,
     },
     fmt::{
         self,
@@ -18,12 +17,15 @@ use std::{
     },
     io::{
         self,
+        BufRead,
+        BufReader,
         Write as IoWrite,
     },
     iter,
-    os::unix::ffi::OsStrExt,
-    path::Path,
-    ptr,
+    path::{
+        Path,
+        PathBuf,
+    },
     time::{
         Duration,
         Instant,
@@ -58,6 +60,7 @@ extern "C" {
 #[derive(Debug)]
 pub enum Error {
     IncorrectInvocation,
+    NoFileOpen,
     NulError(NulError),
     IoError(io::Error),
     FmtError(fmt::Error),
@@ -125,7 +128,7 @@ pub struct Editor {
     rawmode: usize,
     rows: Box<Rows>,
     dirty: bool,
-    filename: *mut c_char,
+    filename: Box<Option<PathBuf>>,
     status: Box<Status>,
 }
 
@@ -142,13 +145,23 @@ impl Default for Editor {
             rawmode: 0,
             rows: Box::new(Vec::new()),
             dirty: true,
-            filename: ptr::null_mut(),
+            filename: Box::new(None),
             status: Box::new(Status::default()),
         }
     }
 }
 
 impl Editor {
+    pub fn open(&mut self, filename: impl AsRef<Path>) -> KiroResult<()> {
+        self.filename = Box::new(Some(filename.as_ref().to_owned()));
+        let file = BufReader::new(File::open(filename)?);
+        for line in file.lines() {
+            self.append_line(line?);
+        }
+        self.dirty = false;
+        Ok(())
+    }
+
     pub fn draw(&self) -> KiroResult<()> {
         let mut output = String::new();
         write!(output, "{}{}", ansi::HIDE_CURSOR, ansi::GOTO_TOP_LEFT)?;
@@ -205,7 +218,7 @@ impl Editor {
     fn render_status_message(&self) -> String {
         let lstatus = format!(
             "{} - {} lines {}",
-            unsafe { CStr::from_ptr(self.filename).to_string_lossy() },
+            self.filename(),
             self.rows.len(),
             if self.dirty { "(modified)" } else { "" },
         );
@@ -414,12 +427,7 @@ impl Editor {
     }
 
     fn save(&mut self) -> KiroResult<u64> {
-        if self.filename.is_null() {
-            panic!("null filename");
-        }
-        let path = std::fs::canonicalize(OsStr::from_bytes(
-            &unsafe { CStr::from_ptr(self.filename as _) }.to_bytes(),
-        ))?;
+        let path = std::fs::canonicalize((&*self.filename).as_ref().ok_or(Error::NoFileOpen)?)?;
         let file_name = {
             let mut file_name = path.file_name().unwrap().to_os_string();
             file_name.push("~kirosave");
@@ -456,8 +464,11 @@ impl Editor {
         self.coloff + self.cx
     }
 
-    fn filename(&self) -> impl AsRef<Path> {
-        OsStr::from_bytes(unsafe { CStr::from_ptr(self.filename) }.to_bytes())
+    fn filename(&self) -> std::path::Display {
+        (&*self.filename)
+            .as_ref()
+            .map_or_else(|| Path::new("<<new file>>"), PathBuf::as_ref)
+            .display()
     }
 
     fn empty_line() -> Cow<'static, str> {
@@ -627,7 +638,7 @@ pub extern "C" fn editorSave() {
         Err(err) => {
             instance().set_status(format!(
                 "Could not write to file `{}`: {:?}",
-                instance().filename().as_ref().display(),
+                instance().filename(),
                 err
             ));
         }

@@ -4,10 +4,7 @@ use std::{
     mem,
 };
 
-use libc::{
-    c_char,
-    c_int,
-};
+use libc::c_int;
 
 use kiro::{
     Editor,
@@ -16,7 +13,6 @@ use kiro::{
 
 #[link(name = "kilo", kind = "static")]
 extern "C" {
-    fn editorOpen(filename: *mut c_char);
     fn enableRawMode(fd: c_int);
     fn editorProcessKeypress(fd: c_int);
     fn updateWindowSize();
@@ -33,7 +29,7 @@ extern "C" fn restore_primary_buffer() {
 }
 
 fn main() -> KiroResult<()> {
-    let mut filename = std::env::args()
+    let filename = std::env::args()
         .nth(1)
         .ok_or(kiro::Error::IncorrectInvocation)?;
 
@@ -51,7 +47,7 @@ fn main() -> KiroResult<()> {
             return Err(kiro::Error::IoError(io::Error::last_os_error()));
         }
         libc::atexit(restore_primary_buffer);
-        editorOpen(filename.as_mut_ptr() as _);
+        E.open(filename)?;
         enableRawMode(libc::STDIN_FILENO);
         E.set_status(kiro::HELP_MESSAGE.into());
         loop {

@@ -224,40 +224,6 @@ failed:
     return -1;
 }
 
-/* Load the specified program in the editor memory and returns 0 on success
- * or 1 on error. */
-int editorOpen(char *filename) {
-    FILE *fp;
-
-    E.dirty = false;
-    free(E.filename);
-    size_t fnlen = strlen(filename)+1;
-    E.filename = malloc(fnlen);
-    memcpy(E.filename,filename,fnlen);
-
-    fp = fopen(filename,"r");
-    if (!fp) {
-        if (errno != ENOENT) {
-            perror("Opening file");
-            exit(1);
-        }
-        return 1;
-    }
-
-    char *line = NULL;
-    size_t linecap = 0;
-    ssize_t linelen;
-    while((linelen = getline(&line,&linecap,fp)) != -1) {
-        if (linelen && (line[linelen-1] == '\n' || line[linelen-1] == '\r'))
-            line[--linelen] = '\0';
-        editorInsertRow(E.numrows,line,linelen);
-    }
-    free(line);
-    fclose(fp);
-    E.dirty = false;
-    return 0;
-}
-
 /* Process events arriving from the standard input, which is, the user
  * is typing stuff on the terminal. */
 #define KILO_QUIT_TIMES 3
